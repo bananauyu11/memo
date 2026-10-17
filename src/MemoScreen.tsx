@@ -33,6 +33,24 @@ function folderTree(folders: Folder[], parentId: string | null = null, depth = 0
     .flatMap((f) => [{ folder: f, depth }, ...folderTree(folders, f.id, depth + 1)])
 }
 
+const LIST_RE = /^(\s*)(?:([-*+])|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?/
+
+/**
+ * Text to insert for Enter at `pos`: continues a list item (same indent and
+ * marker, next number, unchecked box) or keeps the line's indentation.
+ * Returns null on an empty list item so the caller can end the list instead.
+ */
+function continuation(value: string, pos: number): string | null {
+  const lineStart = value.lastIndexOf('\n', pos - 1) + 1
+  const line = value.slice(lineStart, pos)
+  const m = line.match(LIST_RE)
+  if (!m) return '\n' + line.match(/^\s*/)![0]
+  if (line.slice(m[0].length).trim() === '') return null
+  const [, indent, bullet, num, delim, space, task] = m
+  const marker = bullet ?? `${Number(num) + 1}${delim}`
+  return `\n${indent}${marker}${space}${task ? '[ ] ' : ''}`
+}
+
 const TOOLS: { label: string; title: string; prefix?: string; wrap?: string }[] = [
   { label: 'H', title: '見出し', prefix: '# ' },
   { label: 'B', title: '太字', wrap: '**' },
@@ -64,6 +82,36 @@ export default function MemoScreen({ id }: { id: string }) {
   useEffect(() => {
     if (editing) textarea.current?.focus()
   }, [editing])
+
+  // Auto-continue lists on Enter. Uses beforeinput so confirming IME
+  // composition (e.g. Japanese input) with Enter is left alone.
+  useEffect(() => {
+    const el = textarea.current
+    if (!editing || !el) return
+    const onBeforeInput = (e: InputEvent) => {
+      if (e.isComposing || (e.inputType !== 'insertLineBreak' && e.inputType !== 'insertParagraph')) return
+      const { selectionStart: s, selectionEnd: end, value } = el
+      const insert = continuation(value, s)
+      let next: string
+      let cursor: number
+      if (insert === null) {
+        // Enter on an empty item ends the list: clear its marker
+        const lineStart = value.lastIndexOf('\n', s - 1) + 1
+        next = value.slice(0, lineStart) + value.slice(end)
+        cursor = lineStart
+      } else {
+        next = value.slice(0, s) + insert + value.slice(end)
+        cursor = s + insert.length
+      }
+      e.preventDefault()
+      // Write to the DOM first so the cursor lands before React re-renders
+      el.value = next
+      el.setSelectionRange(cursor, cursor)
+      actions.updateMemo(id, next)
+    }
+    el.addEventListener('beforeinput', onBeforeInput)
+    return () => el.removeEventListener('beforeinput', onBeforeInput)
+  }, [editing, id])
 
   const html = useMemo(
     () => (memo && !editing ? DOMPurify.sanitize(marked.parse(memo.content) as string) : ''),
