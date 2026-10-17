@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import ListScreen from './ListScreen'
-import MemoScreen from './MemoScreen'
+
+// The editor is large, so it loads only when a memo is opened
+const MemoScreen = lazy(() => import('./MemoScreen'))
 
 export type Route = { type: 'folder'; id: string | null } | { type: 'memo'; id: string }
 
@@ -42,7 +44,9 @@ export default function App() {
   }, [])
 
   return route.type === 'memo' ? (
-    <MemoScreen key={route.id} id={route.id} />
+    <Suspense fallback={null}>
+      <MemoScreen key={route.id} id={route.id} />
+    </Suspense>
   ) : (
     <ListScreen key={route.id ?? 'root'} folderId={route.id} />
   )
